@@ -208,3 +208,5 @@ __marimo__/
 QR-Generator-mail-sender/generated_qr/*
 QR-Generator-mail-sender/.env
 *.env
+QR-Generator-mail-sender/.env
+QR-Generator-mail-sender/*.xlsx
