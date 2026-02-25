@@ -2,6 +2,7 @@ import qrcode
 import pandas as pd
 import smtplib
 import os
+import json
 from email.message import EmailMessage
 from PIL import Image
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 EXCEL_FILE = os.getenv("EXCEL_FILE", "teams.xlsx")
 QR_FOLDER = os.getenv("QR_FOLDER", "generated_qr")
 LOGO_PATH = os.getenv("LOGO_PATH")
+EVENT_NAME = os.getenv("EVENT_NAME", "DEFAULT_EVENT")
 
 # -------- Basic validation ----------
 if not GMAIL_USER or not GMAIL_APP_PASSWORD:
@@ -22,7 +24,6 @@ if not GMAIL_USER or not GMAIL_APP_PASSWORD:
 
 # -------- Create QR folder ----------
 os.makedirs(QR_FOLDER, exist_ok=True)
-
 
 # -------- QR WITH LOGO FUNCTION ----------
 def generate_qr_with_logo(data, logo_path, output_path):
@@ -52,17 +53,19 @@ def generate_qr_with_logo(data, logo_path, output_path):
 
     qr_img.save(output_path)
 
-
 # -------- Safe Filename ----------
 def clean_filename(name):
     return "".join(c for c in str(name) if c.isalnum() or c in (" ", "_")).rstrip()
 
-
 # -------- Read Excel ----------
 df = pd.read_excel(EXCEL_FILE)
 
+# Clean column names
+df.columns = df.columns.str.strip()
 
-# -------- Connect SMTP Once (Better Performance) ----------
+print("Detected Columns:", df.columns.tolist())
+
+# -------- Connect SMTP Once ----------
 with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
     smtp.login(GMAIL_USER, GMAIL_APP_PASSWORD)
 
@@ -75,20 +78,28 @@ with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             lead_email = str(row['Email ID(team lead)'])
             member_email = str(row['Email ID(team member)'])
 
-            # QR Data
-            qr_data = (
-                f"Team Name: {team_name}\n"
-                f"Student Name: {student_name}\n"
-                f"Registration Number: {reg_no}"
-            )
+            # -------- JSON QR Payload ----------
+            qr_payload = {
+                "event": EVENT_NAME,
+                "team_name": team_name,
+                "student_name": student_name,
+                "registration_number": reg_no
+            }
 
+            qr_data = json.dumps(qr_payload, separators=(",", ":"))
+
+            # Print QR content for frontend verification
+            print("QR CONTENT:", qr_data)
+
+            # -------- Generate QR ----------
             safe_team_name = clean_filename(team_name)
             qr_filename = f"{QR_FOLDER}/{safe_team_name}_{reg_no}.png"
 
             generate_qr_with_logo(qr_data, LOGO_PATH, qr_filename)
 
+            # -------- Email ----------
             msg = EmailMessage()
-            msg['Subject'] = f"QR Code - {team_name}"
+            msg['Subject'] = f"{EVENT_NAME} - Entry Pass - {team_name}"
             msg['From'] = GMAIL_USER
             msg['To'] = ", ".join([lead_email, member_email])
 
@@ -97,6 +108,7 @@ Hello,
 
 Please find attached the QR code for:
 
+Event: {EVENT_NAME}
 Team Name: {team_name}
 Student Name: {student_name}
 Registration Number: {reg_no}
