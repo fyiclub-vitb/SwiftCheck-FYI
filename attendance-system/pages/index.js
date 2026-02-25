@@ -4,6 +4,64 @@ const STORAGE_KEY = "attendance_admin_logged_in";
 const RESCAN_LOCK_MS = 2500;
 const POPUP_TIMEOUT_MS = 2200;
 
+function normalizeQrKey(key) {
+  return String(key || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function extractRegNumberFromObject(data) {
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+
+  const normalizedEntries = Object.entries(data).map(([key, value]) => [
+    normalizeQrKey(key),
+    value,
+  ]);
+
+  const keyPriority = [
+    "registrationnumber",
+    "regnumber",
+    "registrationno",
+    "regno",
+  ];
+
+  for (const expectedKey of keyPriority) {
+    const entry = normalizedEntries.find(([key]) => key === expectedKey);
+    if (!entry) {
+      continue;
+    }
+
+    const value = String(entry[1] || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function extractRegNumberFromText(text) {
+  const labeledMatch = text.match(
+    /registration\s*(?:number|no\.?)\s*[:#-]?\s*([A-Za-z0-9-]+)/i
+  );
+  if (labeledMatch && labeledMatch[1]) {
+    return labeledMatch[1].trim();
+  }
+
+  const tokens = text.match(/[A-Za-z0-9-]{5,}/g) || [];
+  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+    const token = tokens[i];
+    if (/[A-Za-z]/.test(token) && /\d/.test(token)) {
+      return token;
+    }
+  }
+
+  return text;
+}
+
 export default function Home() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [loadingScanner, setLoadingScanner] = useState(false);
@@ -11,7 +69,6 @@ export default function Home() {
   const [loginForm, setLoginForm] = useState({
     username: "",
     password: "",
-    adminSecret: "",
   });
   const [manualReg, setManualReg] = useState("");
   const [message, setMessage] = useState(null);
@@ -89,42 +146,115 @@ export default function Home() {
       if (!context) return;
 
       const patterns = {
-        success: [
-          { frequency: 880, duration: 0.11, volume: 0.09 },
-          { frequency: 1174, duration: 0.11, volume: 0.09 },
-        ],
-        warn: [{ frequency: 520, duration: 0.2, volume: 0.08 }],
-        error: [
-          { frequency: 240, duration: 0.14, volume: 0.12 },
-          { frequency: 180, duration: 0.2, volume: 0.12 },
-        ],
+        success: {
+          gap: 0.04,
+          tones: [
+            {
+              frequency: 659.25,
+              duration: 0.1,
+              volume: 0.08,
+              waveform: "triangle",
+            },
+            {
+              frequency: 987.77,
+              duration: 0.12,
+              volume: 0.09,
+              waveform: "triangle",
+            },
+            {
+              frequency: 1318.51,
+              duration: 0.15,
+              volume: 0.075,
+              waveform: "sine",
+            },
+          ],
+        },
+        warn: {
+          gap: 0.08,
+          tones: [
+            {
+              frequency: 560,
+              duration: 0.11,
+              volume: 0.07,
+              waveform: "triangle",
+            },
+            {
+              frequency: 640,
+              duration: 0.11,
+              volume: 0.06,
+              waveform: "triangle",
+            },
+          ],
+        },
+        error: {
+          gap: 0.05,
+          tones: [
+            {
+              frequency: 392,
+              duration: 0.16,
+              volume: 0.11,
+              waveform: "sawtooth",
+              bendTo: 330,
+            },
+            {
+              frequency: 329.63,
+              duration: 0.22,
+              volume: 0.12,
+              waveform: "sawtooth",
+              bendTo: 246.94,
+            },
+          ],
+        },
       };
 
-      const tones = patterns[type] || patterns.error;
-      let start = context.currentTime;
+      const selectedPattern = patterns[type] || patterns.error;
+      const masterGain = context.createGain();
+      const compressor = context.createDynamicsCompressor();
 
-      tones.forEach((tone, index) => {
+      masterGain.gain.value = 0.9;
+      compressor.threshold.value = -28;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 10;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.12;
+
+      masterGain.connect(compressor);
+      compressor.connect(context.destination);
+
+      let start = context.currentTime + 0.005;
+
+      selectedPattern.tones.forEach((tone, index) => {
         const oscillator = context.createOscillator();
         const gainNode = context.createGain();
 
-        oscillator.type = "sine";
-        oscillator.frequency.value = tone.frequency;
+        oscillator.type = tone.waveform || "sine";
+        oscillator.frequency.setValueAtTime(tone.frequency, start);
+        if (tone.bendTo) {
+          oscillator.frequency.exponentialRampToValueAtTime(
+            tone.bendTo,
+            start + tone.duration
+          );
+        }
 
         gainNode.gain.setValueAtTime(0.0001, start);
         gainNode.gain.exponentialRampToValueAtTime(tone.volume, start + 0.02);
         gainNode.gain.exponentialRampToValueAtTime(
+          Math.max(tone.volume * 0.55, 0.0002),
+          start + tone.duration * 0.65
+        );
+        gainNode.gain.exponentialRampToValueAtTime(
           0.0001,
-          start + tone.duration
+          start + tone.duration + 0.06
         );
 
         oscillator.connect(gainNode);
-        gainNode.connect(context.destination);
+        gainNode.connect(masterGain);
 
         oscillator.start(start);
-        oscillator.stop(start + tone.duration + 0.02);
+        oscillator.stop(start + tone.duration + 0.08);
 
-        if (index < tones.length - 1) {
-          start += tone.duration + 0.04;
+        if (index < selectedPattern.tones.length - 1) {
+          start += tone.duration + selectedPattern.gap;
         }
       });
     },
@@ -156,19 +286,15 @@ export default function Home() {
 
     try {
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === "object") {
-        return String(
-          parsed.registration_number ||
-            parsed.reg_number ||
-            parsed.registrationNumber ||
-            ""
-        ).trim();
+      const fromJson = extractRegNumberFromObject(parsed);
+      if (fromJson) {
+        return fromJson;
       }
     } catch {
-      return text;
+      // Not JSON; continue as plain text.
     }
 
-    return text;
+    return extractRegNumberFromText(text).trim();
   }, []);
 
   const markAttendance = useCallback(
@@ -300,7 +426,6 @@ export default function Home() {
     const payload = {
       username: String(loginForm.username || "").trim(),
       password: String(loginForm.password || ""),
-      adminSecret: String(loginForm.adminSecret || "").trim(),
     };
 
     try {
@@ -410,15 +535,6 @@ export default function Home() {
                   required
                 />
               </label>
-              <label>
-                Admin Secret (optional)
-                <input
-                  name="adminSecret"
-                  value={loginForm.adminSecret}
-                  onChange={handleLoginChange}
-                  placeholder="Only if enabled"
-                />
-              </label>
               <button type="submit" className="primary" disabled={isLoggingIn}>
                 {isLoggingIn ? "Signing in..." : "Unlock Scanner"}
               </button>
@@ -430,8 +546,8 @@ export default function Home() {
               <div>
                 <h2>Scanner Live</h2>
                 <p className="muted">
-                  Supports plain reg number or JSON QR with
-                  registration_number.
+                  Supports plain reg number, JSON registration_number, or
+                  labeled text payloads.
                 </p>
               </div>
               <button type="button" className="ghost" onClick={handleLogout}>
@@ -490,14 +606,6 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="tips">
-            <p className="label">Checklist</p>
-            <ul>
-              <li>Sheet tabs named exactly: admins, users</li>
-              <li>Service account has Editor access</li>
-              <li>QR has reg number or registration_number in JSON</li>
-            </ul>
-          </div>
         </div>
       </section>
     </main>

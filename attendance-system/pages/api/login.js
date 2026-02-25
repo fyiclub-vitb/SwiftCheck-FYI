@@ -1,4 +1,4 @@
-import { getSheetByTitle } from "../../lib/sheets";
+import { getSheetRowsByTitle, readRowField } from "../../lib/sheets";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -7,28 +7,38 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { username, password, adminSecret } = req.body || {};
+    const { username, password } = req.body || {};
     const normalizedUsername = String(username || "").trim().toLowerCase();
-    const rawPassword = String(password || "");
+    const normalizedPassword = String(password || "").trim();
 
-    if (!normalizedUsername || !rawPassword) {
+    if (!normalizedUsername || !normalizedPassword) {
       return res.status(400).json({ error: "Username and password required" });
     }
 
-    if (process.env.ADMIN_SECRET_PASSWORD) {
-      if (!adminSecret || adminSecret !== process.env.ADMIN_SECRET_PASSWORD) {
-        return res.status(401).json({ error: "Invalid admin secret" });
-      }
-    }
+    const { rows } = await getSheetRowsByTitle("admins", {
+      expectedHeaders: ["username", "password"],
+      minHeaderMatches: 2,
+    });
 
-    const sheet = await getSheetByTitle("admins");
-    const rows = await sheet.getRows();
+    const match = rows.find((row) => {
+      const rowUsername = String(
+        readRowField(
+          row,
+          ["username", "user name", "admin", "admin username"],
+          0
+        ) || ""
+      )
+        .trim()
+        .toLowerCase();
 
-    const match = rows.find(
-      (row) =>
-        String(row.username || "").trim().toLowerCase() ===
-          normalizedUsername && String(row.password || "") === rawPassword
-    );
+      const rowPassword = String(
+        readRowField(row, ["password", "pass", "admin password"], 1) || ""
+      ).trim();
+
+      return (
+        rowUsername === normalizedUsername && rowPassword === normalizedPassword
+      );
+    });
 
     if (!match) {
       return res.status(401).json({ error: "Invalid credentials" });

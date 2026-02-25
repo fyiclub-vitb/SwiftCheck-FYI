@@ -49,18 +49,16 @@ Create `.env.local` in this folder:
 GOOGLE_SHEET_ID=your_sheet_id_here
 GOOGLE_SERVICE_ACCOUNT_EMAIL=your_service_account_email_here
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYourKeyHere\n-----END PRIVATE KEY-----\n"
-ADMIN_SECRET_PASSWORD=supersecret
 ```
 
 Notes:
 - Keep `\n` in `GOOGLE_PRIVATE_KEY` exactly as-is.
-- `ADMIN_SECRET_PASSWORD` is optional. If set, login requires it.
 
 ## 5. API Logic
 
 - `POST /api/login`
 - Reads `admins` tab.
-- Validates `username`, `password`, and optional admin secret.
+- Validates `username` and `password`.
 
 - `POST /api/mark-attendance`
 - Reads `users` tab.
