@@ -7,9 +7,6 @@ out/
 
 # local environment
 .env
-.env.local
-.env.local.*
-.env.*.local
 
 # logs
 npm-debug.log*
