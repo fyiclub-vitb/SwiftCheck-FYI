@@ -1,0 +1,5 @@
+qrcode[pil]
+pandas
+openpyxl
+pillow
+python-dotenv
